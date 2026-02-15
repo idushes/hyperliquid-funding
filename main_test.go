@@ -1,29 +1,26 @@
-package logic
+package main
 
 import (
-	"hyperliquid-funding/internal/models"
 	"testing"
 )
 
 func TestProcessFundingRates(t *testing.T) {
-	// Mock inputs
-	universe := []models.UniverseItem{
+	universe := []universeItem{
 		{Name: "BTC"},
 		{Name: "ETH"},
 		{Name: "SOL"},
 	}
-	assetCtxs := []models.AssetCtxItem{
+	assetCtxs := []assetCtxItem{
 		{Funding: "0.0001"},
 		{Funding: "0.0002"},
 		{Funding: "0.0003"},
 	}
 	allowedSymbols := map[string]bool{
 		"BTCUSDT": true,
-		// ETHUSDT not allowed
 		"SOLUSDT": true,
 	}
 
-	results, err := ProcessFundingRates(universe, assetCtxs, allowedSymbols)
+	results, err := processFundingRates(universe, assetCtxs, allowedSymbols)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -32,7 +29,6 @@ func TestProcessFundingRates(t *testing.T) {
 		t.Errorf("expected 2 results, got %d", len(results))
 	}
 
-	// Verify BTC Data
 	btc := results[0]
 	if btc.Symbol != "BTCUSDT" {
 		t.Errorf("expected BTCUSDT, got %s", btc.Symbol)
@@ -44,7 +40,6 @@ func TestProcessFundingRates(t *testing.T) {
 		t.Errorf("expected 28800 interval, got %d", btc.Data.IntervalSec)
 	}
 
-	// Verify SOL Data
 	sol := results[1]
 	if sol.Symbol != "SOLUSDT" {
 		t.Errorf("expected SOLUSDT, got %s", sol.Symbol)
@@ -55,8 +50,6 @@ func TestProcessFundingRates(t *testing.T) {
 }
 
 func TestProcessPredictedFunding(t *testing.T) {
-	// Mock JSON response matching Real API structure:
-	// [ ["Symbol", [ ["Exchange", {"fundingRate": "...", "nextFundingTime": 123...}], ... ]] ]
 	rawJSON := `[
 		["BTC", [
 			["BinPerp", {"fundingRate": "0.0001", "nextFundingTime": 1700000000000}],
@@ -75,7 +68,7 @@ func TestProcessPredictedFunding(t *testing.T) {
 		"SOLUSDT": true,
 	}
 
-	results, err := ProcessPredictedFunding([]byte(rawJSON), allowedSymbols)
+	results, err := processPredictedFunding([]byte(rawJSON), allowedSymbols)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -84,12 +77,10 @@ func TestProcessPredictedFunding(t *testing.T) {
 		t.Errorf("expected 2 results, got %d", len(results))
 	}
 
-	// Verify BTC
 	btc := results[0]
 	if btc.Symbol != "BTCUSDT" {
 		t.Errorf("expected BTCUSDT, got %s", btc.Symbol)
 	}
-	// We expect 0.00015 (HlPerp), not 0.0001 (BinPerp)
 	if btc.Data.Rate != 0.00015 {
 		t.Errorf("expected 0.00015, got %f", btc.Data.Rate)
 	}
@@ -104,7 +95,7 @@ func TestParseMetaAndAssetCtxs(t *testing.T) {
 		[{"funding": "0.01"}, {"funding": "0.02"}]
 	]`
 
-	u, ctx, err := ParseMetaAndAssetCtxs([]byte(rawJSON))
+	u, ctx, err := parseMetaAndAssetCtxs([]byte(rawJSON))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

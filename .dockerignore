@@ -1,7 +1,0 @@
-.git
-.env
-hyperliquid-funding-job
-bin/
-vendor/
-*.exe
-*.test
