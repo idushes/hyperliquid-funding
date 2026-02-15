@@ -1,6 +1,6 @@
 # Hyperliquid Funding Rate Microservice
 
-This service polls the Hyperliquid API for funding rates and predicted funding rates, publishing them to NATS JetStream.
+This service listens on a NATS JetStream subject (`funding.hyperliquid.check`) and, upon receiving a message, polls the Hyperliquid API for funding rates and predicted funding rates, publishing them back to NATS JetStream.
 
 ## Usage
 
@@ -13,19 +13,20 @@ The service is configured via environment variables. You can use a `.env` file f
 | `NATS_URL`            | NATS Server URL                           | `nats://localhost:4222`            |
 | `HYPERLIQUID_API_URL` | Hyperliquid Info API URL                  | `https://api.hyperliquid.xyz/info` |
 | `FUNDING_KV_BUCKET`   | NATS KV Bucket containing allowed symbols | `funding_symbols`                  |
+| `CONSUMER_NAME`       | Durable consumer name                     | `hyperliquid-funding`              |
+| `STREAM_NAME`         | NATS JetStream stream name                | `FUNDING`                          |
+| `CHECK_SUBJECT`       | Subject to listen for trigger messages    | `funding.hyperliquid.check`        |
 
 ### 2. Running
 
-The service is designed to run as a **Kubernetes Job** or **CronJob** (e.g., every minute).
-
-**Build and Run:**
+The service runs as a **long-lived NATS consumer**. It waits for messages on `funding.hyperliquid.check` and executes one data collection cycle per message.
 
 ```bash
 # Build
-go build -o hyperliquid-funding-job ./cmd/funding-job/main.go
+go build -o hyperliquid-funding .
 
-# Run (Executes one cycle and exits)
-./hyperliquid-funding-job
+# Run
+./hyperliquid-funding
 ```
 
 ## Data Formats

@@ -9,7 +9,9 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"os/signal"
 	"strconv"
+	"syscall"
 	"time"
 
 	"github.com/joho/godotenv"
@@ -24,6 +26,9 @@ type config struct {
 	HyperliquidAPIURL string
 	FundingKVBucket   string
 	Environment       string
+	ConsumerName      string
+	StreamName        string
+	CheckSubject      string
 }
 
 type fundingRate struct {
@@ -81,6 +86,9 @@ func loadConfig() *config {
 		HyperliquidAPIURL: getEnv("HYPERLIQUID_API_URL", "https://api.hyperliquid.xyz/info"),
 		FundingKVBucket:   getEnv("FUNDING_KV_BUCKET", "funding_symbols"),
 		Environment:       getEnv("APP_ENV", "local"),
+		ConsumerName:      getEnv("CONSUMER_NAME", "hyperliquid-funding"),
+		StreamName:        getEnv("STREAM_NAME", "FUNDING"),
+		CheckSubject:      getEnv("CHECK_SUBJECT", "funding.hyperliquid.check"),
 	}
 }
 
@@ -367,7 +375,7 @@ func getKeys(m map[string]bool) []string {
 func main() {
 	cfg := loadConfig()
 
-	log.Printf("Starting Funding Job. Env: %s, NATS: %s, API: %s", cfg.Environment, cfg.NatsURL, cfg.HyperliquidAPIURL)
+	log.Printf("Starting Funding Consumer. Env: %s, NATS: %s, API: %s", cfg.Environment, cfg.NatsURL, cfg.HyperliquidAPIURL)
 
 	log.Println("Connecting to NATS...")
 	nc, err := connectNats(cfg.NatsURL)
@@ -382,14 +390,48 @@ func main() {
 		log.Fatalf("CRITICAL: Failed to init KV bucket: %v", err)
 	}
 
-	log.Println("Job started. Fetching Hyperliquid data...")
+	// Create consumer
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 
-	if err := runCycle(nc, cfg); err != nil {
-		log.Printf("ERROR: Job cycle failed: %v", err)
-		os.Exit(1)
+	consumer, err := nc.js.CreateOrUpdateConsumer(ctx, cfg.StreamName, jetstream.ConsumerConfig{
+		Durable:       cfg.ConsumerName,
+		FilterSubject: cfg.CheckSubject,
+		AckPolicy:     jetstream.AckExplicitPolicy,
+	})
+	if err != nil {
+		log.Fatalf("CRITICAL: Failed to create consumer: %v", err)
 	}
+	log.Printf("Consumer '%s' ready. Listening on '%s'...", cfg.ConsumerName, cfg.CheckSubject)
 
-	log.Println("Job completed successfully.")
+	// Graceful shutdown
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+
+	go func() {
+		<-sigCh
+		log.Println("Shutdown signal received, stopping...")
+		cancel()
+	}()
+
+	// Consume messages
+	cons, err := consumer.Consume(func(msg jetstream.Msg) {
+		log.Println("Received check message. Running cycle...")
+		if err := runCycle(nc, cfg); err != nil {
+			log.Printf("ERROR: Cycle failed: %v", err)
+			_ = msg.Nak()
+			return
+		}
+		_ = msg.Ack()
+		log.Println("Cycle completed successfully.")
+	})
+	if err != nil {
+		log.Fatalf("CRITICAL: Failed to start consuming: %v", err)
+	}
+	defer cons.Stop()
+
+	<-ctx.Done()
+	log.Println("Service stopped.")
 }
 
 func runCycle(nc *natsClient, cfg *config) error {
